@@ -1,8 +1,43 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { toPng } from 'html-to-image'
 import { renderMarkdownToHtml } from './useMarkdownRenderer'
 import { MarkdownContent } from './MarkdownContent'
 import './App.css'
+
+const STORAGE_KEY_PREFIX = 'markvista_file_'
+
+function getFileIdFromUrl() {
+  const hash = window.location.hash
+  const match = hash.match(/file=([^&]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function setFileIdInUrl(fileId) {
+  if (fileId) {
+    const hash = window.location.hash.replace(/#file=[^&]*/, '')
+    window.location.hash = hash ? `${hash}&file=${encodeURIComponent(fileId)}` : `file=${encodeURIComponent(fileId)}`
+  } else {
+    window.location.hash = window.location.hash.replace(/[&?]file=[^&]*/, '')
+  }
+}
+
+function saveFileToStorage(fileId, fileName, content) {
+  try {
+    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${fileId}`, JSON.stringify({ fileName, content }))
+  } catch (e) {
+    console.warn('保存文件到 sessionStorage 失败', e)
+  }
+}
+
+function loadFileFromStorage(fileId) {
+  try {
+    const data = sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${fileId}`)
+    return data ? JSON.parse(data) : null
+  } catch (e) {
+    console.warn('从 sessionStorage 读取文件失败', e)
+    return null
+  }
+}
 
 export default function App() {
   const [content, setContent] = useState('')
@@ -11,17 +46,36 @@ export default function App() {
   const [headings, setHeadings] = useState([])
   const fileInputRef = useRef(null)
   const currentFileRef = useRef(null)
+  const currentFileIdRef = useRef(null)
   const contentWrapRef = useRef(null)
 
   const html = content ? renderMarkdownToHtml(content) : ''
 
-  const loadFile = useCallback((file) => {
+  // 页面加载时从 URL 恢复文件
+  useEffect(() => {
+    const fileId = getFileIdFromUrl()
+    if (fileId) {
+      const saved = loadFileFromStorage(fileId)
+      if (saved) {
+        setFileName(saved.fileName)
+        setContent(saved.content)
+        currentFileIdRef.current = fileId
+      }
+    }
+  }, [])
+
+  const loadFile = useCallback((file, fileId) => {
     if (!file) return
     currentFileRef.current = file
     setFileName(file.name)
     setMermaidReady(false)
     file.text().then((text) => {
       setContent(text)
+      // 生成文件 ID 并保存到 sessionStorage 和 URL
+      const id = fileId || `${file.name}_${Date.now()}`
+      currentFileIdRef.current = id
+      saveFileToStorage(id, file.name, text)
+      setFileIdInUrl(id)
     }).catch(() => {
       setContent('')
     })
@@ -29,7 +83,9 @@ export default function App() {
 
   const handleSelectFile = (e) => {
     const file = e.target.files?.[0]
-    if (file && file.name.endsWith('.md')) loadFile(file)
+    if (file && file.name.endsWith('.md')) {
+      loadFile(file)
+    }
     e.target.value = ''
   }
 
@@ -39,6 +95,10 @@ export default function App() {
     setMermaidReady(false)
     file.text().then((text) => {
       setContent(text)
+      // 更新存储的内容
+      if (currentFileIdRef.current) {
+        saveFileToStorage(currentFileIdRef.current, file.name, text)
+      }
     }).catch(() => {})
   }
 

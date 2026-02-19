@@ -39,6 +39,7 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
   const fullscreenPanZoomRef = useRef(null)
   const [fullscreenSvg, setFullscreenSvg] = useState(null)
   const fullscreenWrapRef = useRef(null)
+  const fullscreenOverlayRef = useRef(null)
 
   // 正文内只渲染 Mermaid，不启用 pan-zoom；为每个图添加全屏按钮
   const runMermaid = useCallback(async () => {
@@ -90,9 +91,17 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
     runMermaid()
   }, [html, runMermaid])
 
-  // 全屏层：挂载 svg-pan-zoom，ESC/关闭按钮/点击背景关闭
+  // 全屏层：挂载 svg-pan-zoom，触摸手势，ESC/关闭按钮/点击背景关闭
   useEffect(() => {
     if (!fullscreenSvg || !fullscreenWrapRef.current) return
+    
+    let panZoomInstance = null
+    let touchState = {
+      touches: [],
+      lastPan: { x: 0, y: 0 },
+      lastZoom: 1,
+      lastThreeFingerCenter: { x: 0, y: 0 },
+    }
     
     // 等待 DOM 更新完成后再初始化 svg-pan-zoom
     const timer = setTimeout(() => {
@@ -116,23 +125,121 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
         svgEl.style.width = `${wrapRect.width}px`
         svgEl.style.height = `${wrapRect.height}px`
         
-        const instance = svgPanZoom(svgEl, {
+        // 禁用 SVG 元素的默认触摸行为
+        svgEl.style.touchAction = 'none'
+        
+        panZoomInstance = svgPanZoom(svgEl, {
           minZoom: 0.5,
           maxZoom: 10,
           fit: true,
           center: true,
           zoomScaleSensitivity: 0.35,
+          panEnabled: true,
+          zoomEnabled: true,
+          controlIconsEnabled: false,
         })
-        fullscreenPanZoomRef.current = instance
+        
+        // 禁用 svg-pan-zoom 的默认触摸处理
+        if (svgEl.parentElement) {
+          svgEl.parentElement.style.touchAction = 'none'
+        }
+        fullscreenPanZoomRef.current = panZoomInstance
         
         // 强制刷新，确保 fit 生效
         setTimeout(() => {
-          instance.resize()
-          instance.fit()
-          instance.center()
+          panZoomInstance.resize()
+          panZoomInstance.fit()
+          panZoomInstance.center()
         }, 150)
       }
     }, 150)
+    
+    // 触摸手势处理：两指移动=拖动，三指移动=缩放
+    // 注意：由于 svg-pan-zoom 的默认行为，实际需要交换逻辑
+    const handleTouchStart = (e) => {
+      e.stopPropagation() // 阻止事件冒泡，避免 svg-pan-zoom 的默认处理
+      touchState.touches = Array.from(e.touches)
+      if (touchState.touches.length === 2 && panZoomInstance) {
+        // 两指：记录中心点用于缩放（实际对应平移）
+        const center = getTouchCenter(touchState.touches)
+        touchState.lastThreeFingerCenter = center
+      } else if (touchState.touches.length === 3 && panZoomInstance) {
+        // 三指：记录中心点用于平移（实际对应缩放）
+        const center = getTouchCenter(touchState.touches)
+        touchState.lastPan = center
+      }
+    }
+    
+    const handleTouchMove = (e) => {
+      e.preventDefault()
+      e.stopPropagation() // 阻止事件冒泡，避免 svg-pan-zoom 的默认处理
+      if (!panZoomInstance) return
+      
+      const touches = Array.from(e.touches)
+      
+      // 两指移动 = 拖动（平移）- 实际执行缩放逻辑来抵消默认行为
+      if (touches.length === 2) {
+        // 检查是否有 lastThreeFingerCenter，如果没有则初始化
+        if (!touchState.lastThreeFingerCenter || (touchState.lastThreeFingerCenter.x === 0 && touchState.lastThreeFingerCenter.y === 0)) {
+          const center = getTouchCenter(touches)
+          touchState.lastThreeFingerCenter = center
+          return
+        }
+        const center = getTouchCenter(touches)
+        const dx = center.x - touchState.lastThreeFingerCenter.x
+        const dy = center.y - touchState.lastThreeFingerCenter.y
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+          panZoomInstance.panBy({ x: dx, y: dy })
+          touchState.lastThreeFingerCenter = center
+        }
+      }
+      // 三指移动 = 缩放 - 实际执行平移逻辑来抵消默认行为
+      else if (touches.length === 3) {
+        // 检查是否有 lastPan，如果没有则初始化
+        if (!touchState.lastPan || (touchState.lastPan.x === 0 && touchState.lastPan.y === 0)) {
+          const center = getTouchCenter(touches)
+          touchState.lastPan = center
+          return
+        }
+        const center = getTouchCenter(touches)
+        const dy = center.y - touchState.lastPan.y
+        // 向上移动 = 放大，向下移动 = 缩小
+        // 根据移动距离计算缩放比例
+        const zoomDelta = -dy * 0.01 // 每移动 1px，缩放变化 1%
+        const currentZoom = panZoomInstance.getZoom()
+        const newZoom = Math.max(0.5, Math.min(10, currentZoom + zoomDelta))
+        panZoomInstance.zoom(newZoom)
+        touchState.lastPan = center
+      }
+      
+      touchState.touches = touches
+    }
+    
+    const handleTouchEnd = () => {
+      touchState.touches = []
+    }
+    
+    const getTouchCenter = (touches) => {
+      const x = touches.reduce((sum, t) => sum + t.clientX, 0) / touches.length
+      const y = touches.reduce((sum, t) => sum + t.clientY, 0) / touches.length
+      return { x, y }
+    }
+    
+    const getTouchDistance = (touches) => {
+      if (touches.length < 2) return 1
+      const dx = touches[1].clientX - touches[0].clientX
+      const dy = touches[1].clientY - touches[0].clientY
+      return Math.sqrt(dx * dx + dy * dy)
+    }
+    
+    const overlay = fullscreenOverlayRef.current
+    if (overlay) {
+      // 使用 capture 阶段，确保我们的处理先于 svg-pan-zoom
+      overlay.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true })
+      overlay.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
+      overlay.addEventListener('touchend', handleTouchEnd, { capture: true })
+      overlay.addEventListener('touchcancel', handleTouchEnd, { capture: true })
+    }
     
     const onKey = (e) => {
       if (e.key === 'Escape') setFullscreenSvg(null)
@@ -142,8 +249,14 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
     return () => {
       clearTimeout(timer)
       window.removeEventListener('keydown', onKey)
-      if (fullscreenPanZoomRef.current) {
-        try { fullscreenPanZoomRef.current.destroy(); } catch (_) {}
+      if (overlay) {
+        overlay.removeEventListener('touchstart', handleTouchStart)
+        overlay.removeEventListener('touchmove', handleTouchMove)
+        overlay.removeEventListener('touchend', handleTouchEnd)
+        overlay.removeEventListener('touchcancel', handleTouchEnd)
+      }
+      if (panZoomInstance) {
+        try { panZoomInstance.destroy(); } catch (_) {}
         fullscreenPanZoomRef.current = null
       }
     }
@@ -179,6 +292,7 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
       />
       {fullscreenSvg && (
         <div
+          ref={fullscreenOverlayRef}
           className="mermaid-fullscreen-overlay"
           role="dialog"
           aria-modal="true"
