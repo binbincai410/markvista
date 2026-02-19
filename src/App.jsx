@@ -61,9 +61,13 @@ function setHeadingIdInUrl(headingId) {
   }
 }
 
-function saveFileToStorage(fileId, fileName, content) {
+function saveFileToStorage(fileId, fileName, content, usedFileSystemAccess = false) {
   try {
-    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${fileId}`, JSON.stringify({ fileName, content }))
+    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${fileId}`, JSON.stringify({ 
+      fileName, 
+      content,
+      usedFileSystemAccess // 标记是否使用了 File System Access API
+    }))
   } catch (e) {
     console.warn('保存文件到 sessionStorage 失败', e)
   }
@@ -86,6 +90,7 @@ export default function App() {
   const [headings, setHeadings] = useState([])
   const fileInputRef = useRef(null)
   const currentFileRef = useRef(null)
+  const currentFileHandleRef = useRef(null) // File System Access API 文件句柄
   const currentFileIdRef = useRef(null)
   const contentWrapRef = useRef(null)
 
@@ -100,6 +105,28 @@ export default function App() {
         setFileName(saved.fileName)
         setContent(saved.content)
         currentFileIdRef.current = fileId
+        
+        // 如果之前使用了 File System Access API，显示一个提示，让用户可以选择重新加载
+        if (saved.usedFileSystemAccess && 'showOpenFilePicker' in window) {
+          // 延迟显示提示，先让页面显示缓存内容
+          setTimeout(() => {
+            // 检查是否已经显示过提示（避免重复提示）
+            const promptKey = `reload_prompt_${fileId}`
+            if (!sessionStorage.getItem(promptKey)) {
+              const shouldReload = confirm(
+                `检测到文件 "${saved.fileName}" 已更新。\n\n` +
+                `点击"确定"重新加载最新内容，或"取消"继续查看缓存内容。\n\n` +
+                `（下次刷新页面时将不再提示）`
+              )
+              sessionStorage.setItem(promptKey, 'shown')
+              
+              if (shouldReload) {
+                // 用户选择重新加载，打开文件选择器
+                handleSelectFileWithHandle()
+              }
+            }
+          }, 1000) // 延迟 1 秒，让用户先看到内容
+        }
         
         // 恢复章节位置
         const headingId = getHeadingIdFromUrl()
@@ -126,32 +153,153 @@ export default function App() {
       // 生成文件 ID 并保存到 sessionStorage 和 URL
       const id = fileId || `${file.name}_${Date.now()}`
       currentFileIdRef.current = id
-      saveFileToStorage(id, file.name, text)
+      // 标记是否使用了 File System Access API
+      const usedFileSystemAccess = !!currentFileHandleRef.current
+      saveFileToStorage(id, file.name, text, usedFileSystemAccess)
       setFileIdInUrl(id)
     }).catch(() => {
       setContent('')
     })
   }, [])
+  
+  // 使用 File System Access API 选择文件
+  const handleSelectFileWithHandle = async () => {
+    if (!('showOpenFilePicker' in window)) {
+      // 浏览器不支持，回退到传统方式
+      fileInputRef.current?.click()
+      return
+    }
+    
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{
+          description: 'Markdown files',
+          accept: { 'text/markdown': ['.md'] }
+        }],
+        excludeAcceptAllOption: false,
+        multiple: false
+      })
+      
+      currentFileHandleRef.current = handle
+      const file = await handle.getFile()
+      loadFile(file)
+    } catch (err) {
+      // 用户取消选择或其他错误
+      if (err.name !== 'AbortError') {
+        console.error('选择文件失败', err)
+      }
+    }
+  }
 
   const handleSelectFile = (e) => {
     const file = e.target.files?.[0]
     if (file && file.name.endsWith('.md')) {
+      console.log('传统文件选择器选择了文件:', file.name)
+      // 传统文件选择器无法获取文件句柄，所以设为 null
+      currentFileHandleRef.current = null
       loadFile(file)
     }
     e.target.value = ''
   }
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
+    console.log('刷新按钮被点击', {
+      hasHandle: !!currentFileHandleRef.current,
+      hasFile: !!currentFileRef.current,
+      fileName
+    })
+    
+    // 优先使用 File System Access API 文件句柄重新读取
+    if (currentFileHandleRef.current) {
+      try {
+        console.log('使用文件句柄重新读取文件')
+        setMermaidReady(false)
+        const file = await currentFileHandleRef.current.getFile()
+        const text = await file.text()
+        console.log('文件读取成功，长度:', text.length)
+        // 直接更新内容，不清空（避免 DOM 元素被移除导致错误）
+        setContent(text)
+        // 更新存储的内容
+        if (currentFileIdRef.current) {
+          saveFileToStorage(currentFileIdRef.current, file.name, text, true)
+        }
+        currentFileRef.current = file
+        return
+      } catch (err) {
+        console.warn('使用文件句柄读取失败，尝试其他方式', err)
+        // 文件句柄可能已失效，清除它
+        currentFileHandleRef.current = null
+      }
+    }
+    
+    // 回退到使用文件对象
     const file = currentFileRef.current
-    if (!file) return
+    if (!file) {
+      console.log('没有文件对象，尝试打开文件选择器')
+      // 如果没有文件对象（从 URL 恢复的情况），尝试自动打开文件选择器
+      if (fileName && currentFileIdRef.current) {
+        // 如果支持 File System Access API，尝试使用它
+        if ('showOpenFilePicker' in window) {
+          try {
+            const [handle] = await window.showOpenFilePicker({
+              types: [{
+                description: 'Markdown files',
+                accept: { 'text/markdown': ['.md'] }
+              }],
+              excludeAcceptAllOption: false,
+              multiple: false
+            })
+            currentFileHandleRef.current = handle
+            const newFile = await handle.getFile()
+            // 检查文件名是否匹配
+            if (newFile.name === fileName) {
+              console.log('文件名匹配，重新读取文件')
+              setMermaidReady(false)
+              const text = await newFile.text()
+              setContent(text)
+              currentFileRef.current = newFile
+              if (currentFileIdRef.current) {
+                saveFileToStorage(currentFileIdRef.current, newFile.name, text, true)
+              }
+              return
+            } else {
+              // 文件名不匹配，加载新文件
+              console.log('文件名不匹配，加载新文件')
+              loadFile(newFile)
+              return
+            }
+          } catch (err) {
+            if (err.name !== 'AbortError') {
+              console.error('打开文件选择器失败', err)
+            }
+            // 用户取消，回退到传统方式
+          }
+        }
+        // 回退到传统文件选择器
+        console.log('回退到传统文件选择器')
+        fileInputRef.current?.click()
+      } else {
+        alert('请先选择文件')
+      }
+      return
+    }
+    
+    // 使用文件对象重新读取
+    console.log('使用文件对象重新读取')
     setMermaidReady(false)
     file.text().then((text) => {
+      console.log('文件读取成功，长度:', text.length)
+      // 直接更新内容，不清空（避免 DOM 元素被移除导致错误）
       setContent(text)
       // 更新存储的内容
       if (currentFileIdRef.current) {
-        saveFileToStorage(currentFileIdRef.current, file.name, text)
+        const usedFileSystemAccess = !!currentFileHandleRef.current
+        saveFileToStorage(currentFileIdRef.current, file.name, text, usedFileSystemAccess)
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.error('读取文件失败', err)
+      alert('读取文件失败，请重新选择文件')
+    })
   }
 
   const handleExportPdf = () => {
@@ -233,7 +381,7 @@ export default function App() {
   return (
     <>
       <header className="toolbar">
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
+        <button type="button" onClick={handleSelectFileWithHandle}>
           选择文件
         </button>
         <input

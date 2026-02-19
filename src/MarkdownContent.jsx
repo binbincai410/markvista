@@ -60,11 +60,15 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
     for (const wrap of mermaidContainers) {
       const mermaidEl = wrap.querySelector('.mermaid')
       if (!mermaidEl) continue
+      // 检查元素是否还在 DOM 中
+      if (!mermaidEl.parentNode) continue
       try {
         const { svg } = await mermaid.render(
           `mermaid-${Math.random().toString(36).slice(2)}`,
           mermaidEl.textContent
         )
+        // 再次检查元素是否还在 DOM 中（可能在渲染过程中被移除）
+        if (!mermaidEl.parentNode) continue
         mermaidEl.outerHTML = svg
         const svgEl = wrap.querySelector('svg')
         if (svgEl) {
@@ -143,7 +147,10 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
           wrap.appendChild(btnContainer)
         }
       } catch (err) {
-        mermaidEl.outerHTML = `<div class="mermaid-error">Mermaid 渲染失败：${escapeHtml(String(err.message || err))}</div>`
+        // 检查元素是否还在 DOM 中
+        if (mermaidEl.parentNode) {
+          mermaidEl.outerHTML = `<div class="mermaid-error">Mermaid 渲染失败：${escapeHtml(String(err.message || err))}</div>`
+        }
       }
     }
 
