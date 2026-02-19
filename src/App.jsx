@@ -12,12 +12,52 @@ function getFileIdFromUrl() {
   return match ? decodeURIComponent(match[1]) : null
 }
 
+function getHeadingIdFromUrl() {
+  const hash = window.location.hash
+  const match = hash.match(/heading=([^&]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 function setFileIdInUrl(fileId) {
+  const hash = window.location.hash
   if (fileId) {
-    const hash = window.location.hash.replace(/#file=[^&]*/, '')
-    window.location.hash = hash ? `${hash}&file=${encodeURIComponent(fileId)}` : `file=${encodeURIComponent(fileId)}`
+    // 移除所有 file 参数，然后添加新的
+    const parts = hash.split('&').filter(p => p && !p.startsWith('file=') && !p.startsWith('#file='))
+    const headingPart = parts.find(p => p.startsWith('heading='))
+    const otherParts = parts.filter(p => !p.startsWith('heading='))
+    
+    // 构建新的 hash：file 参数 + heading 参数（如果有）+ 其他参数
+    const newParts = [`file=${encodeURIComponent(fileId)}`]
+    if (headingPart) newParts.push(headingPart)
+    if (otherParts.length > 0) newParts.push(...otherParts)
+    
+    window.location.hash = newParts.join('&')
   } else {
-    window.location.hash = window.location.hash.replace(/[&?]file=[^&]*/, '')
+    // 移除所有 file 参数
+    const parts = hash.split('&').filter(p => p && !p.startsWith('file=') && !p.startsWith('#file='))
+    window.location.hash = parts.length > 0 ? parts.join('&') : ''
+  }
+}
+
+function setHeadingIdInUrl(headingId) {
+  const hash = window.location.hash
+  if (headingId) {
+    // 移除所有 heading 参数，保留 file 和其他参数，然后添加新的 heading
+    const parts = hash.split('&').filter(p => p && !p.startsWith('heading=') && !p.startsWith('#heading='))
+    const filePart = parts.find(p => p.startsWith('file=') || p.startsWith('#file='))
+    const otherParts = parts.filter(p => !p.startsWith('file=') && !p.startsWith('#file='))
+    
+    // 构建新的 hash：file 参数（如果有）+ heading 参数 + 其他参数
+    const newParts = []
+    if (filePart) newParts.push(filePart.startsWith('#') ? filePart : `#${filePart}`)
+    newParts.push(`heading=${encodeURIComponent(headingId)}`)
+    if (otherParts.length > 0) newParts.push(...otherParts)
+    
+    window.location.hash = newParts.join('&')
+  } else {
+    // 移除所有 heading 参数
+    const parts = hash.split('&').filter(p => p && !p.startsWith('heading=') && !p.startsWith('#heading='))
+    window.location.hash = parts.length > 0 ? parts.join('&') : ''
   }
 }
 
@@ -51,7 +91,7 @@ export default function App() {
 
   const html = content ? renderMarkdownToHtml(content) : ''
 
-  // 页面加载时从 URL 恢复文件
+  // 页面加载时从 URL 恢复文件和章节位置
   useEffect(() => {
     const fileId = getFileIdFromUrl()
     if (fileId) {
@@ -60,6 +100,18 @@ export default function App() {
         setFileName(saved.fileName)
         setContent(saved.content)
         currentFileIdRef.current = fileId
+        
+        // 恢复章节位置
+        const headingId = getHeadingIdFromUrl()
+        if (headingId) {
+          // 等待内容渲染完成后再跳转
+          setTimeout(() => {
+            const el = document.getElementById(headingId)
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }
+          }, 500)
+        }
       }
     }
   }, [])
@@ -133,8 +185,50 @@ export default function App() {
   const onHeadingsReady = useCallback((list) => setHeadings(list || []), [])
   const scrollToHeading = (id) => {
     const el = document.getElementById(id)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setHeadingIdInUrl(id)
+    }
   }
+
+  // 监听滚动，更新当前章节位置到 URL
+  useEffect(() => {
+    if (!content || headings.length === 0) return
+
+    let scrollTimer = null
+    const handleScroll = () => {
+      clearTimeout(scrollTimer)
+      scrollTimer = setTimeout(() => {
+        // 找到当前视口中最接近顶部的标题
+        const scrollTop = window.scrollY || document.documentElement.scrollTop
+        let currentHeading = null
+        let minDistance = Infinity
+
+        headings.forEach(({ id }) => {
+          const el = document.getElementById(id)
+          if (el) {
+            const rect = el.getBoundingClientRect()
+            const distance = Math.abs(rect.top)
+            // 如果标题在视口上方或接近顶部（100px 内），认为是当前章节
+            if (rect.top <= 100 && distance < minDistance) {
+              minDistance = distance
+              currentHeading = id
+            }
+          }
+        })
+
+        if (currentHeading) {
+          setHeadingIdInUrl(currentHeading)
+        }
+      }, 150) // 防抖，150ms
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      clearTimeout(scrollTimer)
+    }
+  }, [content, headings])
 
   return (
     <>

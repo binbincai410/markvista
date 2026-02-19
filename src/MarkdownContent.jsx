@@ -15,6 +15,10 @@ mermaid.initialize({
     secondaryColor: '#fffacd',
     tertiaryColor: '#fff',
   },
+  flowchart: {
+    htmlLabels: true,
+    curve: 'basis',
+  },
 })
 
 function slugFromText(text) {
