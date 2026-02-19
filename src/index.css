@@ -17,5 +17,7 @@ body {
 @media print {
   body { background: #fff; }
   .toolbar { display: none !important; }
+  .toc-sidebar { display: none !important; }
+  .mermaid-fullscreen-overlay { display: none !important; }
   .markdown-body { max-width: none !important; box-shadow: none !important; }
 }

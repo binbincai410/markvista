@@ -8,6 +8,7 @@ export default function App() {
   const [content, setContent] = useState('')
   const [fileName, setFileName] = useState('')
   const [mermaidReady, setMermaidReady] = useState(true)
+  const [headings, setHeadings] = useState([])
   const fileInputRef = useRef(null)
   const currentFileRef = useRef(null)
   const contentWrapRef = useRef(null)
@@ -69,6 +70,11 @@ export default function App() {
   }
 
   const onMermaidReady = useCallback(() => setMermaidReady(true), [])
+  const onHeadingsReady = useCallback((list) => setHeadings(list || []), [])
+  const scrollToHeading = (id) => {
+    const el = document.getElementById(id)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   return (
     <>
@@ -106,11 +112,36 @@ export default function App() {
           style={{ overflow: 'visible' }}
         >
           {content ? (
-            <MarkdownContent html={html} onMermaidReady={onMermaidReady} />
+            <MarkdownContent
+              html={html}
+              onMermaidReady={onMermaidReady}
+              onHeadingsReady={onHeadingsReady}
+            />
           ) : (
             <p className="placeholder">请点击「选择文件」打开 .md 文件</p>
           )}
         </div>
+        {content && (
+          <aside className="toc-sidebar">
+            <div className="toc-title">章节导航</div>
+            {headings.length === 0 ? (
+              <p className="toc-empty">暂无标题</p>
+            ) : (
+              <nav className="toc-nav">
+                {headings.map(({ level, text, id }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`toc-item toc-level-${level}`}
+                    onClick={() => scrollToHeading(id)}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </aside>
+        )}
       </main>
     </>
   )
