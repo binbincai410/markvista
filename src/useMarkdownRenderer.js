@@ -3,7 +3,7 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 
 const md = new MarkdownIt({
-  html: true,
+  html: false, // 禁用原始 HTML，防止 XSS 攻击
   linkify: true,
   highlight(str, lang) {
     if (lang && hljs.getLanguage(lang)) {
