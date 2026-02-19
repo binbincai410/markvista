@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import mermaid from 'mermaid'
 import svgPanZoom from 'svg-pan-zoom'
+import { toPng } from 'html-to-image'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -66,17 +67,76 @@ export function MarkdownContent({ html, onMermaidReady, onHeadingsReady }) {
           svgEl.style.maxWidth = '100%'
           svgEl.style.height = 'auto'
         }
-        // 已存在全屏按钮则跳过（避免重复）
+        // 已存在按钮则跳过（避免重复）
         if (!wrap.querySelector('.mermaid-fullscreen-btn')) {
-          const btn = document.createElement('button')
-          btn.type = 'button'
-          btn.className = 'mermaid-fullscreen-btn'
-          btn.textContent = '全屏'
-          btn.onclick = () => {
+          // 创建按钮容器
+          const btnContainer = document.createElement('div')
+          btnContainer.className = 'mermaid-buttons'
+          
+          // 全屏按钮
+          const fullscreenBtn = document.createElement('button')
+          fullscreenBtn.type = 'button'
+          fullscreenBtn.className = 'mermaid-fullscreen-btn'
+          fullscreenBtn.innerHTML = '⛶' // 全屏图标
+          fullscreenBtn.title = '全屏'
+          fullscreenBtn.onclick = () => {
             const svgNode = wrap.querySelector('svg')
             if (svgNode) setFullscreenSvg(svgForFullscreen(svgNode.outerHTML))
           }
-          wrap.appendChild(btn)
+          
+          // 下载按钮
+          const downloadBtn = document.createElement('button')
+          downloadBtn.type = 'button'
+          downloadBtn.className = 'mermaid-download-btn'
+          downloadBtn.innerHTML = '⬇' // 下载图标
+          downloadBtn.title = '下载图片'
+          downloadBtn.onclick = async () => {
+            const svgNode = wrap.querySelector('svg')
+            if (!svgNode) return
+            
+            try {
+              // 使用 html-to-image 库导出，避免 CORS 问题
+              const dataUrl = await toPng(svgNode, {
+                pixelRatio: 2,
+                backgroundColor: '#ffffff',
+                width: svgNode.getBoundingClientRect().width,
+                height: svgNode.getBoundingClientRect().height,
+                style: {
+                  margin: '0',
+                  padding: '0',
+                },
+              })
+              
+              const a = document.createElement('a')
+              a.href = dataUrl
+              a.download = `mermaid-${Date.now()}.png`
+              document.body.appendChild(a)
+              a.click()
+              document.body.removeChild(a)
+            } catch (err) {
+              console.error('下载图片失败', err)
+              // 降级方案：直接下载 SVG 文件
+              try {
+                const svgData = new XMLSerializer().serializeToString(svgNode)
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+                const url = URL.createObjectURL(svgBlob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `mermaid-${Date.now()}.svg`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                setTimeout(() => URL.revokeObjectURL(url), 100)
+              } catch (svgErr) {
+                console.error('下载 SVG 也失败', svgErr)
+                alert('下载图片失败：' + (err.message || '未知错误'))
+              }
+            }
+          }
+          
+          btnContainer.appendChild(fullscreenBtn)
+          btnContainer.appendChild(downloadBtn)
+          wrap.appendChild(btnContainer)
         }
       } catch (err) {
         mermaidEl.outerHTML = `<div class="mermaid-error">Mermaid 渲染失败：${escapeHtml(String(err.message || err))}</div>`
