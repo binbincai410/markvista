@@ -5,6 +5,89 @@ import { MarkdownContent } from './MarkdownContent'
 import './App.css'
 
 const STORAGE_KEY_PREFIX = 'markvista_file_'
+const INDEXEDDB_NAME = 'markvista_db'
+const INDEXEDDB_STORE = 'file_handles'
+
+// IndexedDB 工具函数：保存文件句柄
+async function saveFileHandleToIndexedDB(fileId, handle) {
+  if (!('indexedDB' in window)) return false
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(INDEXEDDB_NAME, 1)
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve(request.result)
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result
+        if (!db.objectStoreNames.contains(INDEXEDDB_STORE)) {
+          db.createObjectStore(INDEXEDDB_STORE)
+        }
+      }
+    })
+    
+    const transaction = db.transaction([INDEXEDDB_STORE], 'readwrite')
+    const store = transaction.objectStore(INDEXEDDB_STORE)
+    await new Promise((resolve, reject) => {
+      const request = store.put(handle, fileId)
+      request.onsuccess = () => resolve()
+      request.onerror = () => reject(request.error)
+    })
+    return true
+  } catch (err) {
+    console.warn('保存文件句柄到 IndexedDB 失败', err)
+    return false
+  }
+}
+
+// IndexedDB 工具函数：加载文件句柄
+async function loadFileHandleFromIndexedDB(fileId) {
+  if (!('indexedDB' in window)) return null
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(INDEXEDDB_NAME, 1)
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve(request.result)
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result
+        if (!db.objectStoreNames.contains(INDEXEDDB_STORE)) {
+          db.createObjectStore(INDEXEDDB_STORE)
+        }
+      }
+    })
+    
+    const transaction = db.transaction([INDEXEDDB_STORE], 'readonly')
+    const store = transaction.objectStore(INDEXEDDB_STORE)
+    return await new Promise((resolve, reject) => {
+      const request = store.get(fileId)
+      request.onsuccess = () => resolve(request.result || null)
+      request.onerror = () => reject(request.error)
+    })
+  } catch (err) {
+    console.warn('从 IndexedDB 加载文件句柄失败', err)
+    return null
+  }
+}
+
+// IndexedDB 工具函数：删除文件句柄
+async function deleteFileHandleFromIndexedDB(fileId) {
+  if (!('indexedDB' in window)) return
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(INDEXEDDB_NAME, 1)
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve(request.result)
+    })
+    
+    const transaction = db.transaction([INDEXEDDB_STORE], 'readwrite')
+    const store = transaction.objectStore(INDEXEDDB_STORE)
+    await new Promise((resolve, reject) => {
+      const request = store.delete(fileId)
+      request.onsuccess = () => resolve()
+      request.onerror = () => reject(request.error)
+    })
+  } catch (err) {
+    console.warn('删除文件句柄失败', err)
+  }
+}
 
 function getFileIdFromUrl() {
   const hash = window.location.hash
@@ -102,53 +185,73 @@ export default function App() {
     if (fileId) {
       const saved = loadFileFromStorage(fileId)
       if (saved) {
-        setFileName(saved.fileName)
-        setContent(saved.content)
         currentFileIdRef.current = fileId
         
-        // 如果之前使用了 File System Access API，显示一个提示，让用户可以选择重新加载
+        // 尝试从 IndexedDB 恢复文件句柄并直接读取最新文件
         if (saved.usedFileSystemAccess && 'showOpenFilePicker' in window) {
-          // 延迟显示提示，先让页面显示缓存内容
-          setTimeout(() => {
-            // 检查是否已经显示过提示（避免重复提示）
-            const promptKey = `reload_prompt_${fileId}`
-            if (!sessionStorage.getItem(promptKey)) {
-              const shouldReload = confirm(
-                `检测到文件 "${saved.fileName}" 已更新。\n\n` +
-                `点击"确定"重新加载最新内容，或"取消"继续查看缓存内容。\n\n` +
-                `（下次刷新页面时将不再提示）`
-              )
-              sessionStorage.setItem(promptKey, 'shown')
-              
-              if (shouldReload) {
-                // 用户选择重新加载，打开文件选择器
-                handleSelectFileWithHandle()
+          loadFileHandleFromIndexedDB(fileId).then(async (handle) => {
+            if (handle) {
+              try {
+                // 验证文件句柄是否仍然有效
+                const file = await handle.getFile()
+                if (file.name === saved.fileName) {
+                  // 文件句柄有效，直接读取最新内容
+                  const text = await file.text()
+                  setContent(text)
+                  setFileName(file.name)
+                  currentFileRef.current = file
+                  currentFileHandleRef.current = handle
+                  // 更新 sessionStorage（仅用于保存文件名等信息）
+                  saveFileToStorage(fileId, file.name, text, true)
+                  
+                  // 恢复章节位置
+                  const headingId = getHeadingIdFromUrl()
+                  if (headingId) {
+                    // 等待内容渲染完成后再跳转
+                    setTimeout(() => {
+                      const el = document.getElementById(headingId)
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }
+                    }, 500)
+                  }
+                } else {
+                  // 文件名不匹配，删除无效的文件句柄
+                  await deleteFileHandleFromIndexedDB(fileId)
+                }
+              } catch (err) {
+                // 文件句柄无效，删除它
+                console.warn('文件句柄无效，已删除', err)
+                await deleteFileHandleFromIndexedDB(fileId)
               }
             }
-          }, 1000) // 延迟 1 秒，让用户先看到内容
-        }
-        
-        // 恢复章节位置
-        const headingId = getHeadingIdFromUrl()
-        if (headingId) {
-          // 等待内容渲染完成后再跳转
-          setTimeout(() => {
-            const el = document.getElementById(headingId)
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            }
-          }, 500)
+          })
+        } else {
+          // 没有使用 File System Access API，显示缓存内容（传统方式）
+          setFileName(saved.fileName)
+          setContent(saved.content)
+          
+          // 恢复章节位置
+          const headingId = getHeadingIdFromUrl()
+          if (headingId) {
+            setTimeout(() => {
+              const el = document.getElementById(headingId)
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            }, 500)
+          }
         }
       }
     }
   }, [])
 
-  const loadFile = useCallback((file, fileId) => {
+  const loadFile = useCallback(async (file, fileId) => {
     if (!file) return
     currentFileRef.current = file
     setFileName(file.name)
     setMermaidReady(false)
-    file.text().then((text) => {
+    file.text().then(async (text) => {
       setContent(text)
       // 生成文件 ID 并保存到 sessionStorage 和 URL
       const id = fileId || `${file.name}_${Date.now()}`
@@ -157,6 +260,11 @@ export default function App() {
       const usedFileSystemAccess = !!currentFileHandleRef.current
       saveFileToStorage(id, file.name, text, usedFileSystemAccess)
       setFileIdInUrl(id)
+      
+      // 如果使用了 File System Access API，保存文件句柄到 IndexedDB
+      if (currentFileHandleRef.current) {
+        await saveFileHandleToIndexedDB(id, currentFileHandleRef.current)
+      }
     }).catch(() => {
       setContent('')
     })
