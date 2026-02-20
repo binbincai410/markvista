@@ -33,28 +33,57 @@
 
 .content {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start; /* 改为左对齐，让目录栏可以紧贴右边 */
   align-items: flex-start;
-  gap: 24px;
-  padding: 24px 16px;
+  gap: 72px; /* 从 36px 增加到 72px（再增加一倍） */
+  padding: 24px 0 24px 16px; /* 左边距保持文档内容间距，右边距为 0 让滚动条贴近屏幕 */
   background: #fff;
   max-width: 100%;
+  position: relative; /* 为目录栏定位做准备 */
 }
 
 .content-inner {
   flex: 1;
   min-width: 0;
   max-width: 900px;
+  margin: 0 auto; /* 让文档内容居中，但目录栏可以紧贴右边 */
+  margin-right: calc(347px + 72px); /* 目录栏宽度(347px) + 间距(72px)，避免内容被覆盖 */
 }
 
 .toc-sidebar {
   flex-shrink: 0;
-  width: 220px;
-  position: sticky;
+  width: 347px; /* 从 495px 减少到 347px（减少 30%） */
+  position: fixed; /* 改为 fixed，让目录栏固定在右边 */
+  right: 0; /* 紧贴屏幕右边 */
   top: 60px;
-  padding: 12px 0;
+  max-height: calc(100vh - 80px);
+  /* 减去顶部工具栏和边距的高度 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 0 12px 16px;
+  /* 左边距保持，右边距移除 */
+  padding-right: 0;
   border-left: 1px solid #eaecef;
-  padding-left: 16px;
+  background: #fff; /* 添加背景色，避免内容透过 */
+  z-index: 5; /* 确保在其他内容之上 */
+}
+
+/* 自定义滚动条样式，让它更贴近右边 */
+.toc-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.toc-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.toc-sidebar::-webkit-scrollbar-thumb {
+  background: #d0d7de;
+  border-radius: 4px;
+}
+
+.toc-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #8c959f;
 }
 
 .toc-title {
@@ -74,6 +103,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding-right: 0; /* 移除右边距，让内容更贴近滚动条 */
+  margin-right: 0;
 }
 
 .toc-item {
@@ -95,12 +126,29 @@
   text-decoration: underline;
 }
 
-.toc-level-1 { padding-left: 0; }
-.toc-level-2 { padding-left: 12px; }
-.toc-level-3 { padding-left: 24px; }
-.toc-level-4 { padding-left: 36px; }
-.toc-level-5 { padding-left: 48px; }
-.toc-level-6 { padding-left: 60px; }
+.toc-level-1 {
+  padding-left: 0;
+}
+
+.toc-level-2 {
+  padding-left: 12px;
+}
+
+.toc-level-3 {
+  padding-left: 24px;
+}
+
+.toc-level-4 {
+  padding-left: 36px;
+}
+
+.toc-level-5 {
+  padding-left: 48px;
+}
+
+.toc-level-6 {
+  padding-left: 60px;
+}
 
 .placeholder {
   color: #666;
@@ -118,27 +166,71 @@
   word-wrap: break-word;
 }
 
-.markdown-body > *:first-child { margin-top: 0; }
-.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body>*:first-child {
+  margin-top: 0;
+}
 
-.markdown-body h1, .markdown-body h2, .markdown-body h3,
-.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+.markdown-body>*:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
   margin-top: 24px;
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
 }
 
-.markdown-body h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-.markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-.markdown-body h3 { font-size: 1.25em; }
-.markdown-body h4 { font-size: 1em; }
-.markdown-body h5 { font-size: 0.875em; }
-.markdown-body h6 { font-size: 0.85em; color: #6a737d; }
+.markdown-body h1 {
+  font-size: 2em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
 
-.markdown-body p { margin-top: 0; margin-bottom: 16px; }
-.markdown-body ul, .markdown-body ol { margin-top: 0; margin-bottom: 16px; padding-left: 2em; }
-.markdown-body li { margin-top: 0.25em; }
+.markdown-body h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-body h3 {
+  font-size: 1.25em;
+}
+
+.markdown-body h4 {
+  font-size: 1em;
+}
+
+.markdown-body h5 {
+  font-size: 0.875em;
+}
+
+.markdown-body h6 {
+  font-size: 0.85em;
+  color: #6a737d;
+}
+
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding-left: 2em;
+}
+
+.markdown-body li {
+  margin-top: 0.25em;
+}
+
 .markdown-body blockquote {
   margin: 0 0 16px;
   padding: 0 1em;
@@ -185,10 +277,19 @@
   background: none;
 }
 
-.markdown-body a { color: #0969da; text-decoration: none; }
-.markdown-body a:hover { text-decoration: underline; }
+.markdown-body a {
+  color: #0969da;
+  text-decoration: none;
+}
 
-.markdown-body img { max-width: 100%; height: auto; }
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
 
 .markdown-body .mermaid-container {
   margin: 16px 0;
